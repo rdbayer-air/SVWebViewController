@@ -9,8 +9,9 @@
 #import "SVWebViewControllerActivityChrome.h"
 #import "SVWebViewControllerActivitySafari.h"
 #import "SVWebViewController.h"
+@import WebKit;
 
-@interface SVWebViewController () <UIWebViewDelegate>
+@interface SVWebViewController () <WKNavigationDelegate>
 
 @property (nonatomic, strong) UIBarButtonItem *backBarButtonItem;
 @property (nonatomic, strong) UIBarButtonItem *forwardBarButtonItem;
@@ -18,7 +19,7 @@
 @property (nonatomic, strong) UIBarButtonItem *stopBarButtonItem;
 @property (nonatomic, strong) UIBarButtonItem *actionBarButtonItem;
 
-@property (nonatomic, strong) UIWebView *webView;
+@property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) NSURLRequest *request;
 
 @end
@@ -31,7 +32,7 @@
 - (void)dealloc {
     [self.webView stopLoading];
     [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
-    self.webView.delegate = nil;
+    self.webView.navigationDelegate = nil;
     self.delegate = nil;
 }
 
@@ -112,11 +113,10 @@
 
 #pragma mark - Getters
 
-- (UIWebView*)webView {
+- (WKWebView*)webView {
     if(!_webView) {
-        _webView = [[UIWebView alloc] initWithFrame:[UIScreen mainScreen].bounds];
-        _webView.delegate = self;
-        _webView.scalesPageToFit = YES;
+        _webView = [[WKWebView alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        _webView.navigationDelegate = self;
     }
     return _webView;
 }
@@ -167,10 +167,10 @@
 #pragma mark - Toolbar
 
 - (void)updateToolbarItems {
-    self.backBarButtonItem.enabled = self.self.webView.canGoBack;
-    self.forwardBarButtonItem.enabled = self.self.webView.canGoForward;
+    self.backBarButtonItem.enabled = self.webView.canGoBack;
+    self.forwardBarButtonItem.enabled = self.webView.canGoForward;
     
-    UIBarButtonItem *refreshStopBarButtonItem = self.self.webView.isLoading ? self.stopBarButtonItem : self.refreshBarButtonItem;
+    UIBarButtonItem *refreshStopBarButtonItem = self.webView.isLoading ? self.stopBarButtonItem : self.refreshBarButtonItem;
     
     UIBarButtonItem *fixedSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFixedSpace target:nil action:nil];
     UIBarButtonItem *flexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
@@ -216,47 +216,50 @@
     }
 }
 
-#pragma mark - UIWebViewDelegate
+#pragma mark - WKNavigationDelegate
 
-- (void)webViewDidStartLoad:(UIWebView *)webView {
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
     [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:YES];
     [self updateToolbarItems];
     
-    if ([self.delegate respondsToSelector:@selector(webViewDidStartLoad:)]) {
-        [self.delegate webViewDidStartLoad:webView];
+    if ([self.delegate respondsToSelector:@selector(webView:didStartProvisionalNavigation:)]) {
+        [self.delegate webView:webView didStartProvisionalNavigation:navigation];
     }
 }
 
-
-- (void)webViewDidFinishLoad:(UIWebView *)webView {
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
     
     if (self.navigationItem.title == nil) {
-        self.navigationItem.title = [webView stringByEvaluatingJavaScriptFromString:@"document.title"];
+        [webView evaluateJavaScript:@"document.title" completionHandler:^(id result, NSError *error) {
+            if (!error && [result isKindOfClass:NSString.class]) {
+                self.navigationItem.title = result;
+            }
+        }];
     }
     
     [self updateToolbarItems];
     
-    if ([self.delegate respondsToSelector:@selector(webViewDidFinishLoad:)]) {
-        [self.delegate webViewDidFinishLoad:webView];
+    if ([self.delegate respondsToSelector:@selector(webView:didFinishNavigation:)]) {
+        [self.delegate webView:webView didFinishNavigation:navigation];
     }
 }
 
-- (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error {
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
     [self updateToolbarItems];
     
-    if ([self.delegate respondsToSelector:@selector(webView:didFailLoadWithError:)]) {
-        [self.delegate webView:webView didFailLoadWithError:error];
+    if ([self.delegate respondsToSelector:@selector(webView:didFailNavigation:withError:)]) {
+        [self.delegate webView:webView didFailNavigation:navigation withError:error];
     }
 }
 
-- (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
-    if ([self.delegate respondsToSelector:@selector(webView:shouldStartLoadWithRequest:navigationType:)]) {
-        return [self.delegate webView:webView shouldStartLoadWithRequest:request navigationType:navigationType];
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
+    if ([self.delegate respondsToSelector:@selector(webView:decidePolicyForNavigationAction:decisionHandler:)]) {
+        [self.delegate webView:webView decidePolicyForNavigationAction:navigationAction decisionHandler:decisionHandler];
+    } else {
+        decisionHandler(WKNavigationActionPolicyAllow);
     }
-    
-    return YES;
 }
 
 #pragma mark - Target actions
@@ -279,7 +282,7 @@
 }
 
 - (void)actionButtonTapped:(id)sender {
-    NSURL *url = self.webView.request.URL ? self.webView.request.URL : self.request.URL;
+    NSURL *url = self.webView.URL ?: self.request.URL;
     if (url != nil) {
         if ([[url absoluteString] hasPrefix:@"file:///"]) {
             UIDocumentInteractionController *dc = [UIDocumentInteractionController interactionControllerWithURL:url];
@@ -287,7 +290,7 @@
         } else {
             UIActivityViewController *activityController = [[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:self.activities];
             
-#ifdef __IPHONE_8_0 
+#ifdef __IPHONE_8_0
             if (floor(NSFoundationVersionNumber) > NSFoundationVersionNumber_iOS_7_1 &&
                 UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad)
             {
