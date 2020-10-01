@@ -7,6 +7,7 @@
 //  https://github.com/samvermette/SVWebViewController
 
 #import <UIKit/UIKit.h>
+@import WebKit;
 
 @class SVWebViewController;
 @class SVModalWebViewController;
@@ -16,7 +17,7 @@ typedef NS_ENUM(NSUInteger, SVWebViewControllerDismissButtonStyle) {
     SVWebViewControllerDismissButtonStyleCancel
 };
 
-@protocol SVModalWebViewControllerDelegate <UIWebViewDelegate>
+@protocol SVModalWebViewControllerDelegate <WKNavigationDelegate>
 
 @optional
 - (void)controllerDidPressDoneButton:(SVModalWebViewController *)controller;
